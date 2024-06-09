@@ -1,0 +1,54 @@
+# https://taskfile.dev
+version: '3'
+
+dotenv: ["env"]
+
+env:
+  GOOSE_DRIVER: postgres
+  GOOSE_MIGRATION_DIR: db/migrations
+
+vars:
+  CONNSTRING: postgresql://postgres:$POSTGRES_PASSWORD@localhost:5432/musiclisteners
+
+tasks:
+  default:
+    cmds:
+      - task --list-all
+    silent: true
+
+  # === Docker Tasks ===
+  deploy-postgres:
+    cmds:
+      - docker compose -f docker/docker-compose.yaml up -d
+
+  destroy-postgres:
+    cmds:
+      - docker compose -f docker/docker-compose.yaml down
+
+  reset-postgres:
+    cmds:
+      - task destroy-postgres
+      - task deploy-postgres
+
+
+  # === Migration Tasks ===
+  migration-status:
+    cmds:
+      - GOOSE_DBSTRING={{.CONNSTRING}} goose status 
+
+  migration-version:
+    cmds:
+      - GOOSE_DBSTRING={{.CONNSTRING}} goose version
+
+  migration-new:
+    cmds:
+      - GOOSE_DBSTRING={{.CONNSTRING}} goose create {{.CLI_ARGS}} sql
+
+
+  migration-up:
+    cmds:
+      - APP_USER_POSTGRES_PASSWORD=$APP_USER_POSTGRES_PASSWORD GOOSE_DBSTRING={{.CONNSTRING}} goose up
+
+  migration-down:
+    cmds:
+      - APP_USER_POSTGRES_PASSWORD=$APP_USER_POSTGRES_PASSWORD GOOSE_DBSTRING={{.CONNSTRING}} goose down

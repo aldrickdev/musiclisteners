@@ -9,15 +9,18 @@ import (
 	"log"
 	"os"
 	"strconv"
+
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 )
 
 type Song struct {
-	Name string
-	Artists string
+	Name         string
+	Artists      string
 	ReleasedYear int
 }
 
-// CSv Shape
+// CSV Shape
 const (
 	TrackName = iota
 	ArtistsNames
@@ -45,7 +48,29 @@ const (
 	Speechiness
 )
 
+func getDB(password string) *sqlx.DB {
+	db, err := sqlx.Connect("postgres", "user=app dbname=musiclisteners sslmode=disable password=password")
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	return db
+}
+
 func main() {
+	databasePassword := os.Getenv("APP_USER_POSTGRES_PASSWORD")
+	if databasePassword == "" {
+		log.Fatalf("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
+	}
+
+	db := getDB("yoo")
+
+	if err := db.Ping(); err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Connected to Database")
+
 	file, err := os.Open("spotify_data.csv")
 	if err != nil {
 		log.Fatalf("Failed to open file: %q", err)
@@ -76,16 +101,28 @@ func main() {
 			continue
 		}
 
-		jsonB, err := json.Marshal(Song{
-				Name: row[TrackName],
-				Artists: row[ArtistsNames],
-				ReleasedYear: releaseYear,
+		song := Song{
+			Name:         row[TrackName],
+			Artists:      row[ArtistsNames],
+			ReleasedYear: releaseYear,
+		}
+
+		_, err = db.NamedExec(
+			`INSERT INTO production.available_songs (track_name, artists_name, released_year) VALUES (:track_name, :artists_name, :released_year)`,
+			map[string]interface{}{
+				"track_name":    song.Name,
+				"artists_name":  song.Artists,
+				"released_year": song.ReleasedYear,
 			},
 		)
 		if err != nil {
+			fmt.Printf("Failed to insert the data: %v+, error: %q\n", song, err)
+		}
+
+		_, err = json.Marshal(song)
+		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Fprintf(os.Stdout, "%s\n", jsonB)
+		// fmt.Fprintf(os.Stdout, "%s\n", jsonB)
 	}
-
 }
