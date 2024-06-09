@@ -49,7 +49,8 @@ const (
 )
 
 func getDB(password string) *sqlx.DB {
-	db, err := sqlx.Connect("postgres", "user=app dbname=musiclisteners sslmode=disable password=password")
+	connectString := fmt.Sprintf("user=app dbname=musiclisteners sslmode=disable password=%s", password)
+	db, err := sqlx.Connect("postgres", connectString)
 	if err != nil {
 		log.Fatalln(err)
 	}
