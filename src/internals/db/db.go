@@ -27,6 +27,10 @@ const SelectRandomSong = `
   LIMIT 1;
 `
 
+const SelectAllUsers = `
+  SELECT * FROM production.users
+`
+
 const InsertUser = `
   INSERT INTO production.users (
     name,
@@ -67,5 +71,23 @@ func (db *DB)GetRandomSong() (types.Song, error) {
   }
 
   return types.Song{}, fmt.Errorf("No songs returned")
+}
+
+func (db *DB)GetAllUsers() ([]types.User, error){
+  allUsers := []types.User{}
+  singleUser := types.User{}
+  rows, err := db.Connection.Queryx(SelectAllUsers)
+  if err != nil {
+    return allUsers, fmt.Errorf("Failed to query for all users: %q", err)
+  }
+  for rows.Next() {
+    err := rows.StructScan(&singleUser)
+    if err != nil {
+      return allUsers, fmt.Errorf("Failed to scan for all users: %q", err)
+    }
+
+    allUsers = append(allUsers, singleUser)
+  }
+  return allUsers, nil
 }
 

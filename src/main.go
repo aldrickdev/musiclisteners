@@ -10,12 +10,10 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-
-
 func seedDB(dbConnection *sqlx.DB, songs []types.Song, users []types.User) {
 	results, err := dbConnection.NamedExec(db.InsertAvailableSong, songs)
 	if err != nil {
-		log.Fatalf("Failed to insert songs for seeding: %q",err)
+		log.Fatalf("Failed to insert songs for seeding: %q", err)
 	}
 
 	count, err := results.RowsAffected()
@@ -27,7 +25,7 @@ func seedDB(dbConnection *sqlx.DB, songs []types.Song, users []types.User) {
 
 	results, err = dbConnection.NamedExec(db.InsertUser, users)
 	if err != nil {
-		log.Fatalf("Failed to insert users for seeding: %q",err)
+		log.Fatalf("Failed to insert users for seeding: %q", err)
 	}
 
 	count, err = results.RowsAffected()
@@ -38,7 +36,7 @@ func seedDB(dbConnection *sqlx.DB, songs []types.Song, users []types.User) {
 	}
 }
 
-func mainUserLoop(dbInstance db.DB) {
+func mainUserLoop(dbInstance db.DB, user types.User) {
 	song, err := dbInstance.GetRandomSong()
 	if err != nil {
 		log.Printf("Failed to get a random song: %q\n", err)
@@ -63,7 +61,12 @@ func main() {
 
 	// songs := utils.ImportCSVData("spotify_data.csv", utils.ExtractSongsFromCSVReader)
 	// users := utils.GenerateUsers()
-	// seedDB(db.Connection, songs, users)
+	// seedDB(dbInstance.Connection, songs, users)
 
-	mainUserLoop(*dbInstance)
+	users, err := dbInstance.GetAllUsers()
+	if err != nil {
+		log.Printf("Failed to get all users: %q", err)
+	}
+
+	mainUserLoop(*dbInstance, users[0])
 }
