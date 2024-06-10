@@ -3,8 +3,9 @@ package db
 import (
 	"fmt"
 
-	_ "github.com/lib/pq"
+	"github.com/aldricdev/musiclisteners/internals/types"
 	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 )
 
 const InsertAvailableSong = `
@@ -17,6 +18,13 @@ const InsertAvailableSong = `
     :artists_name, 
     :released_year
   )
+`
+
+const SelectRandomSong = `
+  SELECT * FROM production.available_songs
+  WHERE id >= floor(random() * (SELECT max(id) FROM production.available_songs))
+  ORDER BY id
+  LIMIT 1;
 `
 
 const InsertUser = `
@@ -40,5 +48,24 @@ func NewDB(password string) *DB {
 	return &DB{
     Connection: db,
   }
+}
+
+func (db *DB)GetRandomSong() (types.Song, error) {
+  randomSong := types.Song{}
+  row, err := db.Connection.Queryx(SelectRandomSong)
+  if err != nil {
+    return types.Song{}, fmt.Errorf("Failed to get random song: %q", err)
+  }
+
+  if row.Next() {
+    err = row.StructScan(&randomSong)
+    if err != nil {
+      return types.Song{}, fmt.Errorf("Failed to scan the random song returned: %q", err)
+    }
+
+    return randomSong, nil
+  }
+
+  return types.Song{}, fmt.Errorf("No songs returned")
 }
 
