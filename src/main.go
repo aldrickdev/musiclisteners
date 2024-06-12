@@ -37,7 +37,7 @@ func seedDB(dbConnection *sqlx.DB, songs []types.Song, users []types.User) {
 }
 
 func mainUserLoop(dbInstance db.DB, user types.User) {
-	song, err := dbInstance.GetRandomSong()
+	song, err := dbInstance.SelectRandomSong()
 	if err != nil {
 		log.Printf("Failed to get a random song: %q\n", err)
 	}
@@ -68,5 +68,20 @@ func main() {
 		log.Printf("Failed to get all users: %q", err)
 	}
 
-	mainUserLoop(*dbInstance, users[0])
+	// mainUserLoop(*dbInstance, users[0])
+	song, err := dbInstance.SelectRandomSong()
+	if err != nil {
+		log.Print(err.Error())
+	}
+
+	if err = dbInstance.InsertCurrentlyPlayingSongForUser(users[0], song); err != nil {
+		log.Print(err)
+	}
+
+	song, err = dbInstance.SelectCurrentlyPlayingSongForUser(users[0])
+	if err != nil {
+		log.Printf("Failed to get the current song for user: %v, error: %q", users[0].ID, err)
+	}
+
+	fmt.Printf("Song currently playing: %s\n", song.Name)
 }
