@@ -70,116 +70,155 @@ const InsertUser = `
 `
 
 type DB struct {
-  Connection *sqlx.DB
+	Connection *sqlx.DB
 }
 
-func NewDB(password string) *DB {
+func NewDB(password string) (*DB, error) {
 	connectString := fmt.Sprintf("user=app dbname=musiclisteners sslmode=disable password=%s", password)
-	db := sqlx.MustConnect("postgres", connectString)
+	db, err := sqlx.Connect("postgres", connectString)
+	if err != nil {
+		return nil, err
+	}
 
 	return &DB{
-    Connection: db,
-  }
+		Connection: db,
+	}, nil
 }
 
-func (db *DB)SelectRandomSong() (types.Song, error) {
-  randomSong := types.Song{}
-  row, err := db.Connection.Queryx(SelectRandomSongQuery)
-  if err != nil {
-    return types.Song{}, fmt.Errorf("Failed to get random song: %q", err)
-  }
+func (db *DB) SelectRandomSong() (types.Song, error) {
+	randomSong := types.Song{}
+	row, err := db.Connection.Queryx(SelectRandomSongQuery)
+	if err != nil {
+		return types.Song{}, fmt.Errorf("Failed to get random song: %q", err)
+	}
 
-  if row.Next() {
-    err = row.StructScan(&randomSong)
-    if err != nil {
-      return types.Song{}, fmt.Errorf("Failed to scan the random song returned: %q", err)
-    }
+	if row.Next() {
+		err = row.StructScan(&randomSong)
+		if err != nil {
+			return types.Song{}, fmt.Errorf("Failed to scan the random song returned: %q", err)
+		}
 
-    return randomSong, nil
-  }
+		return randomSong, nil
+	}
 
-  return types.Song{}, fmt.Errorf("No songs returned")
+	return types.Song{}, fmt.Errorf("No songs returned")
 }
 
-func (db *DB)GetAllUsers() ([]types.User, error){
-  allUsers := []types.User{}
-  singleUser := types.User{}
-  rows, err := db.Connection.Queryx(SelectAllUsers)
-  if err != nil {
-    return allUsers, fmt.Errorf("Failed to query for all users: %q", err)
-  }
-  for rows.Next() {
-    err := rows.StructScan(&singleUser)
-    if err != nil {
-      return allUsers, fmt.Errorf("Failed to scan for all users: %q", err)
-    }
+func (db *DB) GetAllUsers() ([]types.User, error) {
+	allUsers := []types.User{}
+	singleUser := types.User{}
+	rows, err := db.Connection.Queryx(SelectAllUsers)
+	if err != nil {
+		return allUsers, fmt.Errorf("Failed to query for all users: %q", err)
+	}
+	for rows.Next() {
+		err := rows.StructScan(&singleUser)
+		if err != nil {
+			return allUsers, fmt.Errorf("Failed to scan for all users: %q", err)
+		}
 
-    allUsers = append(allUsers, singleUser)
-  }
-  return allUsers, nil
+		allUsers = append(allUsers, singleUser)
+	}
+	return allUsers, nil
 }
 
-func (db *DB)SelectCurrentlyPlayingSongForUser(user types.User) (types.Song, error){
-  song := types.Song{}
-  currentSong := types.CurrentlyPlayingSong{}
+func (db *DB) SelectCurrentlyPlayingSongForUser(user types.User) (types.Song, error) {
+	song := types.Song{}
+	currentSong := types.CurrentlyPlayingSong{}
 
-  fmt.Printf("The user is: %v\n", user)
+	log.Printf("The user is: %v\n", user)
 
-  rows, err := db.Connection.NamedQuery(SelectCurrentSongForUserQuery, user)
-  if err != nil {
-    return song, fmt.Errorf("Failed to query for current song: %q", err)
-  }
-  for rows.Next() {
-    err := rows.StructScan(&currentSong)
-    if err != nil {
-      return song, fmt.Errorf("Failed to scan for current song: %q", err)
-    }
-  }
+	rows, err := db.Connection.NamedQuery(SelectCurrentSongForUserQuery, user)
+	if err != nil {
+		return song, fmt.Errorf("Failed to query for current song: %q", err)
+	}
+	for rows.Next() {
+		err := rows.StructScan(&currentSong)
+		if err != nil {
+			return song, fmt.Errorf("Failed to scan for current song: %q", err)
+		}
+	}
 
-  rows, err = db.Connection.NamedQuery(SelectSongByID, map[string]any{
-    "id": currentSong.SongID,
-  })
-  if err != nil {
-    return song, fmt.Errorf("Failed to query for song: %q", err)
-  }
-  for rows.Next() {
-    err := rows.StructScan(&song)
-    if err != nil {
-      return song, fmt.Errorf("Failed to scan for song: %q", err)
-    }
+	rows, err = db.Connection.NamedQuery(SelectSongByID, map[string]any{
+		"id": currentSong.SongID,
+	})
+	if err != nil {
+		return song, fmt.Errorf("Failed to query for song: %q", err)
+	}
+	for rows.Next() {
+		err := rows.StructScan(&song)
+		if err != nil {
+			return song, fmt.Errorf("Failed to scan for song: %q", err)
+		}
 
-    fmt.Printf("Scanned song: %v\n", song)
-  }
+		log.Printf("Scanned song: %v\n", song)
+	}
 
-  return song, nil
+	return song, nil
 }
 
-func (db *DB)InsertCurrentlyPlayingSongForUser(user types.User, song types.Song) (error){
-  result, err := db.Connection.NamedExec(DeleteCurrentSongForUserQuery, user)
-  if err != nil {
-    return fmt.Errorf("Failed to insert current song for user: %q\n", err)
-  }
+func (db *DB) InsertCurrentlyPlayingSongForUser(user types.User, song types.Song) error {
+	result, err := db.Connection.NamedExec(DeleteCurrentSongForUserQuery, user)
+	if err != nil {
+		return fmt.Errorf("Failed to insert current song for user: %q\n", err)
+	}
 
-  rowsDeleted, err := result.RowsAffected()
-  if err != nil {
-    return fmt.Errorf("Failed to delete current song for user: %q\n", err)
-  }
-  log.Printf("%d rows were deleted\n", rowsDeleted)
+	rowsDeleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("Failed to delete current song for user: %q\n", err)
+	}
+	log.Printf("%d rows were deleted\n", rowsDeleted)
 
-  currentSongForUser := types.CurrentlyPlayingSong{
-    UserID: user.ID,
-    SongID: song.ID,
-  }
-  result, err = db.Connection.NamedExec(InsertCurrentlyPlayingSongForUserQuery, currentSongForUser)
-  if err != nil {
-    return fmt.Errorf("Failed to insert current song for user: %q\n", err)
-  }
+	currentSongForUser := types.CurrentlyPlayingSong{
+		UserID: user.ID,
+		SongID: song.ID,
+	}
+	result, err = db.Connection.NamedExec(InsertCurrentlyPlayingSongForUserQuery, currentSongForUser)
+	if err != nil {
+		return fmt.Errorf("Failed to insert current song for user: %q\n", err)
+	}
 
-  rowsInserted, err := result.RowsAffected()
-  if err != nil {
-    return fmt.Errorf("Failed to obtain the count of rows affect: %q\n", err)
-  }
-  log.Printf("%d song inserted for the user", rowsInserted)
-  return nil
+	rowsInserted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("Failed to obtain the count of rows affect: %q\n", err)
+	}
+	log.Printf("%d song inserted for the user", rowsInserted)
+	return nil
 }
 
+func (db *DB) InsertCurrentlyPlayingSongForUserTrans(user types.User, song types.Song) error {
+	tx, err := db.Connection.Beginx()
+	if err != nil {
+		return fmt.Errorf("Failed to create the Transaction: %q", err)
+	}
+	result, err := tx.NamedExec(DeleteCurrentSongForUserQuery, user)
+	if err != nil {
+		return fmt.Errorf("Failed to insert current song for user: %q\n", err)
+	}
+
+	rowsDeleted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("Failed to delete current song for user: %q\n", err)
+	}
+	log.Printf("%d rows were deleted\n", rowsDeleted)
+
+	currentSongForUser := types.CurrentlyPlayingSong{
+		UserID: user.ID,
+		SongID: song.ID,
+	}
+	result, err = tx.NamedExec(InsertCurrentlyPlayingSongForUserQuery, currentSongForUser)
+	if err != nil {
+		return fmt.Errorf("Failed to insert current song for user: %q\n", err)
+	}
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("Failed to run insert current song transaction for user: %q\n", err)
+	}
+
+	rowsInserted, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("Failed to obtain the count of rows affect: %q\n", err)
+	}
+	log.Printf("%d song inserted for the user", rowsInserted)
+	return nil
+}

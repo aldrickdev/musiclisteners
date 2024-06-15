@@ -58,7 +58,7 @@ type FakerUser struct {
 func GenerateUsers() []types.User{
   users := []types.User{}
 
-  for i := range(10) {
+  for i := range(20) {
     user := FakerUser{}
 
     err := faker.FakeData(&user)

@@ -15,6 +15,17 @@ tasks:
     cmds:
       - task --list-all
     silent: true
+     
+  # === Application Tasks ===
+  app-seed:
+    dir: src/
+    cmds:
+      - go run cmd/seed/main.go
+
+  app-run:
+    dir: src/
+    cmds:
+      - go run cmd/app/main.go
 
   # === Docker Tasks ===
   deploy-postgres:
