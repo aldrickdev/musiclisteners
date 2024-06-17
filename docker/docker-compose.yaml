@@ -1,15 +1,26 @@
+version: '3.1'
+
 services:
-  db:
-    container_name: database
-    image: postgres:16
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7.54.0
     env_file: ../env
-    ports:
-    - "5432:5432"
     volumes:
-    - "$PWD/db/initdb/01_create_database.sh:/docker-entrypoint-initdb.d/01.sh"
+    - '/var/run/docker.sock:/var/run/docker.sock:ro'
+    - '$PWD/docker/conf.d/postgres.d:/etc/datadog-agent/conf.d/postgres.d'
 
   adminer:
     container_name: admin
     image: adminer
     ports:
       - "8080:8080"
+
+  db:
+    image: postgres:16
+    env_file: ../env
+    ports:
+      - "5432:5432"
+    command: ["-c", "config_file=/etc/postgresql/postgresql.conf"]
+    volumes:
+    - '$PWD/docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf'
+    - '$PWD/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql'
+

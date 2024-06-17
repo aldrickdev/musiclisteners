@@ -17,6 +17,8 @@ func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 		log.Fatalf("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
 	}
 
+	log.Printf("Beginning Main Loop for User: %d\n", user.ID)
+
 	for {
 		randomSleep := rand.Intn(10) + 0
 		log.Printf("User %d sleeping for %d seconds\n", user.ID, randomSleep)
@@ -32,7 +34,7 @@ func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 		song, err := dbInstance.SelectRandomSong()
 		if err != nil {
 			log.Print(err.Error())
-			break
+			continue
 		}
 
 		if err = dbInstance.InsertCurrentlyPlayingSongForUserTrans(user, song); err != nil {
@@ -43,14 +45,15 @@ func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 		song, err = dbInstance.SelectCurrentlyPlayingSongForUser(user)
 		if err != nil {
 			log.Printf("Failed to get the current song for user: %v, error: %q\n", user.ID, err)
-			break
+			continue
 		}
 
 		log.Printf("Song currently playing: %s\n", song.Name)
 		dbInstance.Connection.Close()
 	}
 
-	wg.Done()
+	// Not running wg.Done() due to this being a forever loop
+	// wg.Done()
 }
 
 func main() {

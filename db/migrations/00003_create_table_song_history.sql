@@ -1,7 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 CREATE TABLE production.song_history(
-    "id" SERIAL NOT NULL,
+    "id" BIGSERIAL NOT NULL,
     "user_id" BIGINT NOT NULL,
     "song_id" BIGINT NOT NULL,
     "timestamp" DATE NOT NULL

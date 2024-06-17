@@ -1,0 +1,27 @@
+init_config:
+instances:
+- host: db
+  dbm: true
+  port: 5432
+  username: datadog
+  password: example
+
+  database_autodiscovery:
+    enabled: true
+
+  relations:
+  - relation_regex: .*
+
+  query_metrics:
+    collection_interval: 0.1
+
+  query_activity:
+    collection_interval: 0.1
+
+  query_samples:
+    collection_interval: 0.1
+
+  collect_schemas:
+    enabled: true
+    collection_interval: 60
+

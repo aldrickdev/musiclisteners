@@ -30,11 +30,15 @@ tasks:
   # === Docker Tasks ===
   deploy-postgres:
     cmds:
-      - docker compose -f docker/docker-compose.yaml up -d
+      - docker compose -p project -f docker/docker-compose.yaml up -d
 
   destroy-postgres:
     cmds:
-      - docker compose -f docker/docker-compose.yaml down
+      - docker compose -p project -f docker/docker-compose.yaml down
+
+  ps:
+    cmds:
+      - docker compose -p project -f docker/docker-compose.yaml ps
 
   reset-postgres:
     cmds:
