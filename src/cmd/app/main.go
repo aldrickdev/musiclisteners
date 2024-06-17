@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"math/rand"
 	"os"
 	"sync"
@@ -14,18 +14,20 @@ import (
 func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 	databasePassword := os.Getenv("APP_USER_POSTGRES_PASSWORD")
 	if databasePassword == "" {
-		log.Fatalf("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
+		slog.Error("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
+		wg.Done()
+		return
 	}
 
-	log.Printf("Beginning Main Loop for User: %d\n", user.ID)
+	slog.Info("Beginning Main Loop for User", "user", user.ID)
 
 	for {
 		randomSleep := rand.Intn(10) + 0
-		log.Printf("User %d sleeping for %d seconds\n", user.ID, randomSleep)
+		slog.Info("User sleeping", "user_id", user.ID, "sleep", randomSleep)
 
 		dbInstance, err := db.NewDB(databasePassword)
 		if err != nil {
-			log.Printf("Failed to connect to database: %q", err)
+			slog.Error("Failed to connect to database", "error", err)
 			continue
 		}
 
@@ -33,22 +35,22 @@ func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 
 		song, err := dbInstance.SelectRandomSong()
 		if err != nil {
-			log.Print(err.Error())
+			slog.Error("Failed to get a random song", "error", err.Error())
 			continue
 		}
 
 		if err = dbInstance.InsertCurrentlyPlayingSongForUserTrans(user, song); err != nil {
-			log.Print(err)
+			slog.Error("Failed to insert current playing song for user", "user_id", user.ID, "song_id", song.ID, "error", err.Error())
 			continue
 		}
 
 		song, err = dbInstance.SelectCurrentlyPlayingSongForUser(user)
 		if err != nil {
-			log.Printf("Failed to get the current song for user: %v, error: %q\n", user.ID, err)
+			slog.Error("Failed to get the current song for user", "user_id", user.ID, "error", err)
 			continue
 		}
 
-		log.Printf("Song currently playing: %s\n", song.Name)
+		slog.Debug("Song currently playing", "user_id", user.ID, "song_id", song.ID)
 		dbInstance.Connection.Close()
 	}
 
@@ -57,25 +59,31 @@ func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 }
 
 func main() {
+	logOpts := &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}
+	log :=	slog.New(slog.NewJSONHandler(os.Stdout, logOpts))
+	slog.SetDefault(log)
+
 	databasePassword := os.Getenv("APP_USER_POSTGRES_PASSWORD")
 	if databasePassword == "" {
-		log.Fatalf("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
+		slog.Error("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
 	}
 
 	dbInstance, err := db.NewDB(databasePassword)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %q", err)
+		slog.Error("Failed to connect to database", "error", err)
 	}
 	defer dbInstance.Connection.Close()
 
 	if err := dbInstance.Connection.Ping(); err != nil {
-		log.Fatalf("Failed to Ping the database: %q", err)
+		slog.Error("Failed to Ping the database", "error", err)
 	}
-	log.Println("Connected to Database")
+	log.Info("Connected to Database")
 
 	users, err := dbInstance.GetAllUsers()
 	if err != nil {
-		log.Fatalf("Failed to get all users: %q", err)
+		slog.Error("Failed to get all users", "error", err)
 	}
 
 	var wg sync.WaitGroup
