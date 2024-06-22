@@ -2,79 +2,23 @@ package db
 
 import (
 	"fmt"
-	"log"
+	"io/fs"
+	"log/slog"
+	"os"
 
 	"github.com/aldricdev/musiclisteners/internals/types"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	"github.com/pressly/goose/v3"
 )
-
-const InsertAvailableSong = `
-  INSERT INTO production.available_songs (
-    track_name, 
-    artists_name, 
-    released_year
-  ) VALUES (
-    :track_name, 
-    :artists_name, 
-    :released_year
-  )
-`
-
-const SelectRandomSongQuery = `
-  SELECT * FROM production.available_songs
-  WHERE id >= floor(random() * (SELECT max(id) FROM production.available_songs))
-  ORDER BY id
-  LIMIT 1;
-`
-
-const SelectSongByID = `
-  SELECT * FROM production.available_songs
-  WHERE id = :id
-  LIMIT 1;
-`
-
-const SelectCurrentSongForUserQuery = `
-  SELECT * FROM production.songs_currently_playing
-  WHERE user_id = :id
-  LIMIT 1;
-`
-
-const DeleteCurrentSongForUserQuery = `
-  DELETE FROM production.songs_currently_playing
-  WHERE user_id = :id;
-`
-
-const InsertCurrentlyPlayingSongForUserQuery = `
-  INSERT INTO production.songs_currently_playing (
-    user_id,
-    song_id
-  ) VALUES (
-    :user_id,
-    :song_id
-  );
-`
-
-const SelectAllUsers = `
-  SELECT * FROM production.users
-`
-
-const InsertUser = `
-  INSERT INTO production.users (
-    name,
-    avatar
-  ) VALUES (
-    :name,
-    :avatar
-  )
-`
 
 type DB struct {
 	Connection *sqlx.DB
 }
 
+// TODO: Add user parameter so that this can be reused in MigrateDB
 func NewDB(password string) (*DB, error) {
-	connectString := fmt.Sprintf("user=app dbname=musiclisteners sslmode=disable password=%s", password)
+	connectString := fmt.Sprintf("host=db user=app dbname=musiclisteners sslmode=disable password=%s", password)
 	db, err := sqlx.Connect("postgres", connectString)
 	if err != nil {
 		return nil, err
@@ -83,6 +27,85 @@ func NewDB(password string) (*DB, error) {
 	return &DB{
 		Connection: db,
 	}, nil
+}
+
+func MigrateDB(migrations fs.FS) error {
+	connectString := fmt.Sprintf("host=db user=postgres dbname=musiclisteners sslmode=disable password=%s", "example")
+	db, err := sqlx.Connect("postgres", connectString)
+	if err != nil {
+		return err
+	}
+
+	goose.SetBaseFS(migrations)
+	if err = goose.SetDialect("postgres"); err != nil {
+		slog.Error("Failed to select a dialect", "error", err)
+		os.Exit(1)
+	}
+
+	if err = goose.Up(db.DB, "embed/migrations"); err != nil {
+		slog.Error("Failed to apply migrations", "error", err)
+		os.Exit(1)
+	}
+
+	return nil
+}
+
+func (db *DB) InsertSeedStatus(status bool) error {
+	statusInt := 0
+	if status {
+		statusInt = 1
+	}
+
+	results, err := db.Connection.NamedExec(InsertSeedStatusQuery, types.Seed{
+		Status: statusInt,
+	})
+	if err != nil {
+		slog.Error("Failed to set seed status", "status", statusInt, "error", err)
+		return err
+	}
+
+	count, err := results.RowsAffected()
+	if err != nil {
+		slog.Warn("Failed to get count of rows affect for seed insert", "error", err)
+	} else {
+		slog.Debug("Row added in the seed table", "rows", count)
+	}
+
+	return nil
+}
+
+func (db *DB) InsertAvailableSongBatch(songs []types.Song) error {
+	results, err := db.Connection.NamedExec(InsertAvailableSongQuery, songs)
+	if err != nil {
+		slog.Error("Failed to seed database with songs", "error", err)
+		return err
+	}
+
+	count, err := results.RowsAffected()
+	if err != nil {
+		slog.Warn("Driver doesn't support result type", "error", err)
+	} else {
+		slog.Debug("Amount of songs inserted", "count", count)
+	}
+
+	return nil
+}
+
+func (db *DB) InsertUserBatch(users []types.User) error {
+	results, err := db.Connection.NamedExec(InsertUserQuery, users)
+	if err != nil {
+		slog.Error("Failed to seed database with users", "error", err)
+		return err
+	}
+
+	count, err := results.RowsAffected()
+	if err != nil {
+		slog.Warn("Driver doesn't support result type", "error", err)
+	} else {
+		slog.Debug("Amount of users inserted", "count", count)
+	}
+
+	return nil
 }
 
 func (db *DB) SelectRandomSong() (types.Song, error) {
@@ -126,8 +149,6 @@ func (db *DB) SelectCurrentlyPlayingSongForUser(user types.User) (types.Song, er
 	song := types.Song{}
 	currentSong := types.CurrentlyPlayingSong{}
 
-	log.Printf("The user is: %v\n", user)
-
 	rows, err := db.Connection.NamedQuery(SelectCurrentSongForUserQuery, user)
 	if err != nil {
 		return song, fmt.Errorf("Failed to query for current song: %q", err)
@@ -151,7 +172,7 @@ func (db *DB) SelectCurrentlyPlayingSongForUser(user types.User) (types.Song, er
 			return song, fmt.Errorf("Failed to scan for song: %q", err)
 		}
 
-		log.Printf("Scanned song: %v\n", song)
+		slog.Debug("Got current song for user", "user_id", user.ID, "song_id", song.ID)
 	}
 
 	return song, nil
@@ -167,7 +188,7 @@ func (db *DB) InsertCurrentlyPlayingSongForUser(user types.User, song types.Song
 	if err != nil {
 		return fmt.Errorf("Failed to delete current song for user: %q\n", err)
 	}
-	log.Printf("%d rows were deleted\n", rowsDeleted)
+	slog.Debug("rows were deleted", "deleted_rows", rowsDeleted)
 
 	currentSongForUser := types.CurrentlyPlayingSong{
 		UserID: user.ID,
@@ -182,7 +203,7 @@ func (db *DB) InsertCurrentlyPlayingSongForUser(user types.User, song types.Song
 	if err != nil {
 		return fmt.Errorf("Failed to obtain the count of rows affect: %q\n", err)
 	}
-	log.Printf("%d song inserted for the user", rowsInserted)
+	slog.Debug("Current song playing inserted for user", "count", rowsInserted, "user_id", user.ID, "song_id", song.ID)
 	return nil
 }
 
@@ -200,7 +221,7 @@ func (db *DB) InsertCurrentlyPlayingSongForUserTrans(user types.User, song types
 	if err != nil {
 		return fmt.Errorf("Failed to delete current song for user: %q\n", err)
 	}
-	log.Printf("%d rows were deleted\n", rowsDeleted)
+	slog.Debug("Currently playing song deleted for user", "count", rowsDeleted, "user_id", user.ID, "song_id", song.ID)
 
 	currentSongForUser := types.CurrentlyPlayingSong{
 		UserID: user.ID,
@@ -219,6 +240,6 @@ func (db *DB) InsertCurrentlyPlayingSongForUserTrans(user types.User, song types
 	if err != nil {
 		return fmt.Errorf("Failed to obtain the count of rows affect: %q\n", err)
 	}
-	log.Printf("%d song inserted for the user", rowsInserted)
+	slog.Debug("Currently playing song inserted for user", "count", rowsInserted, "user_id", user.ID)
 	return nil
 }

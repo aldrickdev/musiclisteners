@@ -6,8 +6,28 @@ instances:
   username: datadog
   password: example
 
-  database_autodiscovery:
+  relations:
+  - relation_regex: .*
+
+  query_metrics:
+    collection_interval: 0.1
+
+  query_activity:
+    collection_interval: 0.1
+
+  query_samples:
+    collection_interval: 0.1
+
+  collect_schemas:
     enabled: true
+    collection_interval: 60
+
+- host: db
+  dbm: true
+  port: 5432
+  username: datadog
+  password: example
+  dbname: musiclisteners
 
   relations:
   - relation_regex: .*
@@ -24,4 +44,18 @@ instances:
   collect_schemas:
     enabled: true
     collection_interval: 60
+
+  custom_queries:
+  - metric_prefix: musiclisteners
+    query: SELECT COUNT(*) FROM production.users;
+    columns: 
+    - name: users.total
+      type: gauge
+
+  - metric_prefix: musiclisteners
+    query: SELECT COUNT(*) FROM production.available_songs;
+    columns: 
+    - name: songs.total
+      type: count
+
 

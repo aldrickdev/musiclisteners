@@ -28,11 +28,16 @@ tasks:
       - go run cmd/app/main.go
 
   # === Docker Tasks ===
-  deploy-postgres:
+  build-project:
     cmds:
+      - docker compose -p project -f docker/docker-compose.yaml build
+
+  deploy-project:
+    cmds:
+      - docker compose -p project -f docker/docker-compose.yaml build
       - docker compose -p project -f docker/docker-compose.yaml up -d
 
-  destroy-postgres:
+  destroy-project:
     cmds:
       - docker compose -p project -f docker/docker-compose.yaml down
 
@@ -40,10 +45,10 @@ tasks:
     cmds:
       - docker compose -p project -f docker/docker-compose.yaml ps
 
-  reset-postgres:
+  restart-project:
     cmds:
-      - task destroy-postgres
-      - task deploy-postgres
+      - task destroy-project
+      - task deploy-project
 
 
   # === Migration Tasks ===

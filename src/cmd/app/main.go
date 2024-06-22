@@ -1,14 +1,30 @@
 package main
 
 import (
+	"embed"
 	"log/slog"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/aldricdev/musiclisteners/internals/db"
 	"github.com/aldricdev/musiclisteners/internals/types"
+	"github.com/aldricdev/musiclisteners/internals/utils"
+)
+
+var (
+	//go:embed embed/migrations/*.sql
+	migrations embed.FS
+
+	//go:embed embed/data/*
+	data embed.FS
+)
+
+const (
+	// In seconds
+	StartUpDelay = 10
 )
 
 func mainUserLoop(wg *sync.WaitGroup, user types.User) {
@@ -28,10 +44,9 @@ func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 		dbInstance, err := db.NewDB(databasePassword)
 		if err != nil {
 			slog.Error("Failed to connect to database", "error", err)
+			time.Sleep(1 * time.Minute)
 			continue
 		}
-
-		time.Sleep(time.Duration(randomSleep) * time.Second)
 
 		song, err := dbInstance.SelectRandomSong()
 		if err != nil {
@@ -50,7 +65,7 @@ func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 			continue
 		}
 
-		slog.Debug("Song currently playing", "user_id", user.ID, "song_id", song.ID)
+		slog.Info("User listening to new song", "user_id", user.ID, "song_id", song.ID)
 		dbInstance.Connection.Close()
 	}
 
@@ -58,12 +73,49 @@ func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 	// wg.Done()
 }
 
+func seedDatabase(dbInstance *db.DB) error {
+	songs := utils.ImportCSVSongFromEmbededFS("embed/data/spotify_data.csv", data, utils.ExtractSongsFromCSVReader)
+	slog.Debug("Extracted songs", "songs", songs)
+
+	users := utils.GenerateUsers(2)
+	slog.Debug("generated users", "users", users)
+
+	if err := utils.SeedDB(dbInstance, songs, users); err != nil {
+		slog.Error("Failed to seed database", "error", err)
+		return err
+	}
+
+	return nil
+}
+
 func main() {
 	logOpts := &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}
-	log :=	slog.New(slog.NewJSONHandler(os.Stdout, logOpts))
+
+	logLevel := os.Getenv("APP_LOG_LEVEL")
+	switch ll := strings.ToLower(logLevel); ll {
+	case "debug":
+		logOpts = &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}
+
+	case "error":
+		logOpts = &slog.HandlerOptions{
+			Level: slog.LevelError,
+		}
+	}
+
+	log := slog.New(slog.NewJSONHandler(os.Stdout, logOpts))
 	slog.SetDefault(log)
+
+	time.Sleep(StartUpDelay * time.Second)
+	slog.Debug("Delay start up to allow for the database to be ready", "delay_in_seconds", StartUpDelay)
+
+	if err := db.MigrateDB(migrations); err != nil {
+		slog.Error("Failed to apply migrations", "error", err)
+		os.Exit(1)
+	}
 
 	databasePassword := os.Getenv("APP_USER_POSTGRES_PASSWORD")
 	if databasePassword == "" {
@@ -73,18 +125,24 @@ func main() {
 	dbInstance, err := db.NewDB(databasePassword)
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
+		os.Exit(1)
 	}
 	defer dbInstance.Connection.Close()
 
 	if err := dbInstance.Connection.Ping(); err != nil {
 		slog.Error("Failed to Ping the database", "error", err)
 	}
-	log.Info("Connected to Database")
+	slog.Info("Connected to Database")
+
+	if err := seedDatabase(dbInstance); err != nil {
+		slog.Error("Failed to seed the database", "error", err)
+	}
 
 	users, err := dbInstance.GetAllUsers()
 	if err != nil {
 		slog.Error("Failed to get all users", "error", err)
 	}
+	slog.Debug("count of users found", "count", len(users))
 
 	var wg sync.WaitGroup
 	wg.Add(len(users))

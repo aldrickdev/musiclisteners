@@ -3,16 +3,29 @@ version: '3.1'
 services:
   datadog-agent:
     image: gcr.io/datadoghq/agent:7.54.0
+    container_name: datadog-agent
+    cgroup: host
+    pid: host
     env_file: ../env
     volumes:
-    - '/var/run/docker.sock:/var/run/docker.sock:ro'
     - '$PWD/docker/conf.d/postgres.d:/etc/datadog-agent/conf.d/postgres.d'
+    - '/var/run/docker.sock:/var/run/docker.sock:ro'
+    - '/var/lib/docker/containers:/var/lib/docker/containers:ro'
+    - '/opt/datadog-agent/run:/opt/datadog-agent/run:rw'
+    depends_on:
+    - db
+    - app
 
-  adminer:
-    container_name: admin
-    image: adminer
-    ports:
-      - "8080:8080"
+  app:
+    container_name: app
+    env_file: ../env
+    build:
+      context: ..
+      dockerfile: docker/app.Dockerfile
+    depends_on:
+    - db
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"go", "service":"musiclisteners", "env":"local"}]'
 
   db:
     image: postgres:16
@@ -23,4 +36,6 @@ services:
     volumes:
     - '$PWD/docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf'
     - '$PWD/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql'
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"postgresql", "service":"musiclisteners-database", "env":"local"}]'
 
