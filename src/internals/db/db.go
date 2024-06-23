@@ -13,20 +13,26 @@ import (
 )
 
 type DB struct {
-	Connection *sqlx.DB
+	Connection  *sqlx.DB
+	QueryBuffer chan QueryExecutor
 }
 
 // TODO: Add user parameter so that this can be reused in MigrateDB
 func NewDB(password string) (*DB, error) {
 	connectString := fmt.Sprintf("host=db user=app dbname=musiclisteners sslmode=disable password=%s", password)
-	db, err := sqlx.Connect("postgres", connectString)
+	connection, err := sqlx.Connect("postgres", connectString)
 	if err != nil {
 		return nil, err
 	}
 
-	return &DB{
-		Connection: db,
-	}, nil
+	db := &DB{
+		Connection:  connection,
+		QueryBuffer: make(chan QueryExecutor, 20),
+	}
+
+	go db.connectionLoop()
+
+	return db, nil
 }
 
 func MigrateDB(migrations fs.FS) error {
@@ -48,6 +54,17 @@ func MigrateDB(migrations fs.FS) error {
 	}
 
 	return nil
+}
+
+func (db *DB) connectionLoop() {
+	for q := range db.QueryBuffer {
+		slog.Debug("Query received", "query", q.GetQuery())
+		db.connectionHandler(q)
+	}
+}
+
+func (db *DB) connectionHandler(query QueryExecutor) {
+	query.Execute(db.Connection)
 }
 
 func (db *DB) InsertSeedStatus(status bool) error {
@@ -130,6 +147,7 @@ func (db *DB) SelectRandomSong() (types.Song, error) {
 func (db *DB) GetAllUsers() ([]types.User, error) {
 	allUsers := []types.User{}
 	singleUser := types.User{}
+
 	rows, err := db.Connection.Queryx(SelectAllUsers)
 	if err != nil {
 		return allUsers, fmt.Errorf("Failed to query for all users: %q", err)

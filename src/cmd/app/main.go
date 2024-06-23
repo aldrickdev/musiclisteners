@@ -27,6 +27,31 @@ const (
 	StartUpDelay = 10
 )
 
+func mainUserLoop2(wg *sync.WaitGroup, user types.User) {
+	databasePassword := os.Getenv("APP_USER_POSTGRES_PASSWORD")
+	if databasePassword == "" {
+		slog.Error("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
+		wg.Done()
+		return
+	}
+	
+	dbInstance, err := db.NewDB(databasePassword)
+	slog.Debug("Trying to connect to the database")
+	if err != nil {
+		slog.Error("Failed to connect to the database", "error", err)
+	}
+
+	resultChan := make(chan db.SelectUsersResult)
+	q := db.NewSelectUsers(resultChan)
+	dbInstance.QueryBuffer <- q
+
+	slog.Debug("Waiting for results")
+	r := <-resultChan
+	slog.Debug("Got Users", "users", r.Users)
+
+	wg.Done()
+}
+
 func mainUserLoop(wg *sync.WaitGroup, user types.User) {
 	databasePassword := os.Getenv("APP_USER_POSTGRES_PASSWORD")
 	if databasePassword == "" {
@@ -77,7 +102,7 @@ func seedDatabase(dbInstance *db.DB) error {
 	songs := utils.ImportCSVSongFromEmbededFS("embed/data/spotify_data.csv", data, utils.ExtractSongsFromCSVReader)
 	slog.Debug("Extracted songs", "songs", songs)
 
-	users := utils.GenerateUsers(2)
+	users := utils.GenerateUsers(5)
 	slog.Debug("generated users", "users", users)
 
 	if err := utils.SeedDB(dbInstance, songs, users); err != nil {
@@ -147,7 +172,11 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(len(users))
 	for _, user := range users {
-		go mainUserLoop(&wg, user)
+		// go mainUserLoop(&wg, user)
+		go mainUserLoop2(&wg, user)
 	}
+
 	wg.Wait()
+
+	slog.Debug("Application finished running")
 }

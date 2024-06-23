@@ -1,5 +1,67 @@
 package db
 
+import (
+	"fmt"
+
+	"github.com/aldricdev/musiclisteners/internals/types"
+	"github.com/jmoiron/sqlx"
+)
+
+type QueryExecutor interface {
+	GetQuery() string
+	Execute(*sqlx.DB)
+}
+
+type SelectUsersResult struct {
+	Users []types.User
+	Err   error
+}
+
+type SelectUsers struct {
+	SQL    string
+	Result chan SelectUsersResult
+}
+
+func NewSelectUsers(result chan SelectUsersResult) *SelectUsers {
+	return &SelectUsers{
+		SQL:    SelectAllUsers,
+		Result: result,
+	}
+}
+
+func (q *SelectUsers) GetQuery() string {
+	return q.SQL
+}
+
+func (q *SelectUsers) Execute(dbConnection *sqlx.DB) {
+	allUsers := []types.User{}
+	singleUser := types.User{}
+
+	rows, err := dbConnection.Queryx(SelectAllUsers)
+	if err != nil {
+
+		q.Result <- SelectUsersResult{
+			Users: allUsers,
+			Err:   fmt.Errorf("Failed to query for all users: %q", err),
+		}
+	}
+	for rows.Next() {
+		err := rows.StructScan(&singleUser)
+		if err != nil {
+			q.Result <- SelectUsersResult{
+				Users: allUsers,
+				Err:   fmt.Errorf("Failed to scan for all users: %q", err),
+			}
+		}
+
+		allUsers = append(allUsers, singleUser)
+	}
+	q.Result <- SelectUsersResult{
+		Users: allUsers,
+		Err:   nil,
+	}
+}
+
 const (
 	InsertAvailableSongQuery = `
 		INSERT INTO production.available_songs (
