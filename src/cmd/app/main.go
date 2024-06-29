@@ -25,84 +25,51 @@ var (
 const (
 	// In seconds
 	StartUpDelay = 10
+
+	// User count
+	MaxUsers = 100
 )
 
-func mainUserLoop2(wg *sync.WaitGroup, user types.User) {
-	databasePassword := os.Getenv("APP_USER_POSTGRES_PASSWORD")
-	if databasePassword == "" {
-		slog.Error("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
-		wg.Done()
-		return
-	}
-	
-	dbInstance, err := db.NewDB(databasePassword)
-	slog.Debug("Trying to connect to the database")
-	if err != nil {
-		slog.Error("Failed to connect to the database", "error", err)
-	}
+func mainUserLoop(wg *sync.WaitGroup, dbConnection *db.DB, user types.User) {
+	for {
+		randomSleep := rand.Intn(10) + 10
+		slog.Debug("User sleeping", "user_id", user.ID, "sleep", randomSleep)
+		time.Sleep(time.Second * time.Duration(randomSleep))
 
-	resultChan := make(chan db.SelectUsersResult)
-	q := db.NewSelectUsers(resultChan)
-	dbInstance.QueryBuffer <- q
 
-	slog.Debug("Waiting for results")
-	r := <-resultChan
-	slog.Debug("Got Users", "users", r.Users)
+
+		randomSongChannel := make(chan db.GetRandomSongQueryResult)
+		randomSongQuery := db.NewGetRandomSongQuery(randomSongChannel)
+		dbConnection.QueryBuffer <- randomSongQuery
+
+		queryBufferLength := len(dbConnection.QueryBuffer)
+		slog.Debug("query buffer size", "user_id", user.ID, "queued_queries_count", queryBufferLength)
+		randomSongResult := <-randomSongChannel
+		slog.Debug("Got Random song", "user_id", user.ID, "song_id", randomSongResult.Song.ID)
+
+
+
+		insertUserCurrentSongResultChannel := make(chan db.InsertUserCurrentSongResult)
+		insertUserCurrentSongQuery := db.NewInsertUserCurrentSongQuery(insertUserCurrentSongResultChannel, user, randomSongResult.Song)
+		dbConnection.QueryBuffer <- insertUserCurrentSongQuery
+
+		queryBufferLength = len(dbConnection.QueryBuffer)
+		slog.Debug("query buffer size", "user_id", user.ID, "queued_queries_count", queryBufferLength)
+		insertUserCurrentSongResult := <-insertUserCurrentSongResultChannel
+		if insertUserCurrentSongResult.Err != nil {
+			slog.Error("Failed to set the current song for user", "error", insertUserCurrentSongResult.Err)
+			break
+		}
+	}
 
 	wg.Done()
-}
-
-func mainUserLoop(wg *sync.WaitGroup, user types.User) {
-	databasePassword := os.Getenv("APP_USER_POSTGRES_PASSWORD")
-	if databasePassword == "" {
-		slog.Error("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
-		wg.Done()
-		return
-	}
-
-	slog.Info("Beginning Main Loop for User", "user", user.ID)
-
-	for {
-		randomSleep := rand.Intn(10) + 0
-		slog.Info("User sleeping", "user_id", user.ID, "sleep", randomSleep)
-
-		dbInstance, err := db.NewDB(databasePassword)
-		if err != nil {
-			slog.Error("Failed to connect to database", "error", err)
-			time.Sleep(1 * time.Minute)
-			continue
-		}
-
-		song, err := dbInstance.SelectRandomSong()
-		if err != nil {
-			slog.Error("Failed to get a random song", "error", err.Error())
-			continue
-		}
-
-		if err = dbInstance.InsertCurrentlyPlayingSongForUserTrans(user, song); err != nil {
-			slog.Error("Failed to insert current playing song for user", "user_id", user.ID, "song_id", song.ID, "error", err.Error())
-			continue
-		}
-
-		song, err = dbInstance.SelectCurrentlyPlayingSongForUser(user)
-		if err != nil {
-			slog.Error("Failed to get the current song for user", "user_id", user.ID, "error", err)
-			continue
-		}
-
-		slog.Info("User listening to new song", "user_id", user.ID, "song_id", song.ID)
-		dbInstance.Connection.Close()
-	}
-
-	// Not running wg.Done() due to this being a forever loop
-	// wg.Done()
 }
 
 func seedDatabase(dbInstance *db.DB) error {
 	songs := utils.ImportCSVSongFromEmbededFS("embed/data/spotify_data.csv", data, utils.ExtractSongsFromCSVReader)
 	slog.Debug("Extracted songs", "songs", songs)
 
-	users := utils.GenerateUsers(5)
+	users := utils.GenerateUsers(MaxUsers)
 	slog.Debug("generated users", "users", users)
 
 	if err := utils.SeedDB(dbInstance, songs, users); err != nil {
@@ -134,8 +101,8 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, logOpts))
 	slog.SetDefault(log)
 
-	time.Sleep(StartUpDelay * time.Second)
 	slog.Debug("Delay start up to allow for the database to be ready", "delay_in_seconds", StartUpDelay)
+	time.Sleep(StartUpDelay * time.Second)
 
 	if err := db.MigrateDB(migrations); err != nil {
 		slog.Error("Failed to apply migrations", "error", err)
@@ -147,33 +114,30 @@ func main() {
 		slog.Error("Missing Environment Variable: APP_USER_POSTGRES_PASSWORD")
 	}
 
-	dbInstance, err := db.NewDB(databasePassword)
+	dbConnection, err := db.NewDBConnection(databasePassword, MaxUsers * 10)
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	defer dbInstance.Connection.Close()
+	defer dbConnection.Connection.Close()
 
-	if err := dbInstance.Connection.Ping(); err != nil {
-		slog.Error("Failed to Ping the database", "error", err)
-	}
-	slog.Info("Connected to Database")
-
-	if err := seedDatabase(dbInstance); err != nil {
+	if err := seedDatabase(dbConnection); err != nil {
 		slog.Error("Failed to seed the database", "error", err)
 	}
 
-	users, err := dbInstance.GetAllUsers()
-	if err != nil {
-		slog.Error("Failed to get all users", "error", err)
-	}
-	slog.Debug("count of users found", "count", len(users))
+	resultChan := make(chan db.GetAllUsersQueryResult)
+	query := db.NewGetAllUsersQuery(resultChan)
+	dbConnection.QueryBuffer <- query
+
+	slog.Debug("Waiting for results")
+	queryResults := <-resultChan
+	slog.Debug("count of users found", "count", len(queryResults.Users))
 
 	var wg sync.WaitGroup
-	wg.Add(len(users))
-	for _, user := range users {
-		// go mainUserLoop(&wg, user)
-		go mainUserLoop2(&wg, user)
+	wg.Add(len(queryResults.Users))
+	for _, user := range queryResults.Users {
+		// go mainUserLoop2(&wg, user)
+		go mainUserLoop(&wg, dbConnection, user)
 	}
 
 	wg.Wait()

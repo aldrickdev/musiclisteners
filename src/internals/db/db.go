@@ -18,7 +18,7 @@ type DB struct {
 }
 
 // TODO: Add user parameter so that this can be reused in MigrateDB
-func NewDB(password string) (*DB, error) {
+func NewDBConnection(password string, querryBufferSize int) (*DB, error) {
 	connectString := fmt.Sprintf("host=db user=app dbname=musiclisteners sslmode=disable password=%s", password)
 	connection, err := sqlx.Connect("postgres", connectString)
 	if err != nil {
@@ -27,7 +27,7 @@ func NewDB(password string) (*DB, error) {
 
 	db := &DB{
 		Connection:  connection,
-		QueryBuffer: make(chan QueryExecutor, 20),
+		QueryBuffer: make(chan QueryExecutor, querryBufferSize),
 	}
 
 	go db.connectionLoop()
@@ -144,7 +144,7 @@ func (db *DB) SelectRandomSong() (types.Song, error) {
 	return types.Song{}, fmt.Errorf("No songs returned")
 }
 
-func (db *DB) GetAllUsers() ([]types.User, error) {
+func (db *DB) GetAllUsersOld() ([]types.User, error) {
 	allUsers := []types.User{}
 	singleUser := types.User{}
 

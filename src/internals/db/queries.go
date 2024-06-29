@@ -2,63 +2,91 @@ package db
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/aldricdev/musiclisteners/internals/types"
 	"github.com/jmoiron/sqlx"
 )
 
 type QueryExecutor interface {
-	GetQuery() string
+	GetQuery() []string
 	Execute(*sqlx.DB)
 }
 
-type SelectUsersResult struct {
-	Users []types.User
-	Err   error
+type InsertUserCurrentSongResult struct {
+	Err error
 }
 
-type SelectUsers struct {
-	SQL    string
-	Result chan SelectUsersResult
+type InsertUserCurrentSongQuery struct {
+	SQL    []string
+	User   types.User
+	Song   types.Song
+	Result chan InsertUserCurrentSongResult
 }
 
-func NewSelectUsers(result chan SelectUsersResult) *SelectUsers {
-	return &SelectUsers{
-		SQL:    SelectAllUsers,
+func NewInsertUserCurrentSongQuery(result chan InsertUserCurrentSongResult, user types.User, song types.Song) *InsertUserCurrentSongQuery {
+	return &InsertUserCurrentSongQuery{
+		SQL:    []string{DeleteCurrentSongForUserQuery, InsertCurrentlyPlayingSongForUserQuery},
+		User:   user,
+		Song:   song,
 		Result: result,
 	}
 }
 
-func (q *SelectUsers) GetQuery() string {
+func (q *InsertUserCurrentSongQuery) GetQuery() []string {
 	return q.SQL
 }
 
-func (q *SelectUsers) Execute(dbConnection *sqlx.DB) {
-	allUsers := []types.User{}
-	singleUser := types.User{}
-
-	rows, err := dbConnection.Queryx(SelectAllUsers)
+func (q *InsertUserCurrentSongQuery) Execute(dbConnection *sqlx.DB) {
+	tx, err := dbConnection.Beginx()
+	if err != nil {
+		q.Result <- InsertUserCurrentSongResult{
+			Err: fmt.Errorf("Failed to create the Transaction: %q", err),
+		}
+		return
+	}
+	result, err := tx.NamedExec(q.SQL[0], q.User)
 	if err != nil {
 
-		q.Result <- SelectUsersResult{
-			Users: allUsers,
-			Err:   fmt.Errorf("Failed to query for all users: %q", err),
+		q.Result <- InsertUserCurrentSongResult{
+			Err: fmt.Errorf("Failed to insert current song for user: %q", err),
 		}
+		return
 	}
-	for rows.Next() {
-		err := rows.StructScan(&singleUser)
-		if err != nil {
-			q.Result <- SelectUsersResult{
-				Users: allUsers,
-				Err:   fmt.Errorf("Failed to scan for all users: %q", err),
-			}
-		}
+	rowsDeleted, err := result.RowsAffected()
+	if err != nil {
+		slog.Debug("Checking count of rows affected is not supported", "error", err)
+	}
+	slog.Debug("Currently playing song deleted for user", "rows_deleted", rowsDeleted, "user_id", q.User.ID)
+	currentSongForUser := types.CurrentlyPlayingSong{
+		UserID: q.User.ID,
+		SongID: q.Song.ID,
+	}
 
-		allUsers = append(allUsers, singleUser)
+	result, err = tx.NamedExec(q.SQL[1], currentSongForUser)
+	if err != nil {
+		q.Result <- InsertUserCurrentSongResult{
+			Err: fmt.Errorf("Failed to insert current song for user: %q", err),
+		}
+		return
 	}
-	q.Result <- SelectUsersResult{
-		Users: allUsers,
-		Err:   nil,
+	err = tx.Commit()
+	if err != nil {
+		q.Result <- InsertUserCurrentSongResult{
+			Err: fmt.Errorf("Failed to run insert current song transaction for user: %q", err),
+		}
+		return
+	}
+
+	rowsInserted, err := result.RowsAffected()
+	if err != nil {
+		slog.Debug("Checking count of rows affected is not supported", "error", err)
+	}
+
+	slog.Debug("Currently playing song inserted for user", "inserted_count", rowsInserted, "user_id", q.User.ID, "song_id", q.Song.ID)
+
+	q.Result <- InsertUserCurrentSongResult{
+		Err: nil,
 	}
 }
 
