@@ -26,7 +26,7 @@ type InsertUserCurrentSongQuery struct {
 
 func NewInsertUserCurrentSongQuery(result chan InsertUserCurrentSongResult, user types.User, song types.Song) *InsertUserCurrentSongQuery {
 	return &InsertUserCurrentSongQuery{
-		SQL:    []string{DeleteCurrentSongForUserQuery, InsertCurrentlyPlayingSongForUserQuery},
+		SQL:    []string{DeleteCurrentSongForUserQuery, InsertCurrentlyPlayingSongForUserQuery, InsertSongHistory},
 		User:   user,
 		Song:   song,
 		Result: result,
@@ -45,6 +45,8 @@ func (q *InsertUserCurrentSongQuery) Execute(dbConnection *sqlx.DB) {
 		}
 		return
 	}
+
+	// Delete users currently playing song
 	result, err := tx.NamedExec(q.SQL[0], q.User)
 	if err != nil {
 
@@ -58,11 +60,13 @@ func (q *InsertUserCurrentSongQuery) Execute(dbConnection *sqlx.DB) {
 		slog.Debug("Checking count of rows affected is not supported", "error", err)
 	}
 	slog.Debug("Currently playing song deleted for user", "rows_deleted", rowsDeleted, "user_id", q.User.ID)
+
+
+	// Insert users currently playing song
 	currentSongForUser := types.CurrentlyPlayingSong{
 		UserID: q.User.ID,
 		SongID: q.Song.ID,
 	}
-
 	result, err = tx.NamedExec(q.SQL[1], currentSongForUser)
 	if err != nil {
 		q.Result <- InsertUserCurrentSongResult{
@@ -70,24 +74,45 @@ func (q *InsertUserCurrentSongQuery) Execute(dbConnection *sqlx.DB) {
 		}
 		return
 	}
-	err = tx.Commit()
-	if err != nil {
-		q.Result <- InsertUserCurrentSongResult{
-			Err: fmt.Errorf("Failed to run insert current song transaction for user: %q", err),
-		}
-		return
-	}
-
 	rowsInserted, err := result.RowsAffected()
 	if err != nil {
 		slog.Debug("Checking count of rows affected is not supported", "error", err)
 	}
+	slog.Debug("Currently playing song inserted for user", "rows_inserted", rowsInserted, "user_id", q.User.ID)
 
-	slog.Debug("Currently playing song inserted for user", "inserted_count", rowsInserted, "user_id", q.User.ID, "song_id", q.Song.ID)
+
+	// Insert users song into song history
+	songHistory := types.SongHistory{
+		UserID: q.User.ID,
+		SongID: q.Song.ID,
+	}
+	result, err = tx.NamedExec(q.SQL[2], songHistory)
+	if err != nil {
+		q.Result <- InsertUserCurrentSongResult{
+			Err: fmt.Errorf("Failed to insert song history for user: %q", err),
+		}
+		return
+	}
+	rowsInserted, err = result.RowsAffected()
+	if err != nil {
+		slog.Debug("Checking count of rows affected is not supported", "error", err)
+	}
+	slog.Debug("Song inserted into song history", "rows_inserted", rowsInserted, "user_id", q.User.ID, "song_id", q.Song.ID)
+
+
+	err = tx.Commit()
+	if err != nil {
+		q.Result <- InsertUserCurrentSongResult{
+			Err: fmt.Errorf("Failed to commit insert current song transaction for user: %q", err),
+		}
+		return
+	}
 
 	q.Result <- InsertUserCurrentSongResult{
 		Err: nil,
 	}
+
+	slog.Info("Currently playing song inserted for user", "inserted_count", rowsInserted, "user_id", q.User.ID, "song_id", q.Song.ID)
 }
 
 const (
@@ -160,6 +185,16 @@ const (
 		) VALUES (
 			:name,
 			:avatar
+		);
+	`
+
+	InsertSongHistory = `
+		INSERT INTO production.song_history (
+			user_id,
+			song_id
+		) VALUES (
+			:user_id,
+			:song_id
 		);
 	`
 )

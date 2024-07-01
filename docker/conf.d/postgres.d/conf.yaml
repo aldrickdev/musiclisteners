@@ -20,7 +20,9 @@ instances:
 
   collect_schemas:
     enabled: true
-    collection_interval: 60
+
+  collect_settings:
+    enabled: true
 
 - host: db
   dbm: true
@@ -43,7 +45,9 @@ instances:
 
   collect_schemas:
     enabled: true
-    collection_interval: 60
+
+  collect_settings:
+    enabled: true
 
   custom_queries:
   - metric_prefix: musiclisteners
@@ -56,6 +60,12 @@ instances:
     query: SELECT COUNT(*) FROM production.available_songs;
     columns: 
     - name: songs.total
+      type: count
+
+  - metric_prefix: musiclisteners
+    query: SELECT COUNT(*) FROM production.song_history;
+    columns: 
+    - name: song_history.total
       type: count
 
 

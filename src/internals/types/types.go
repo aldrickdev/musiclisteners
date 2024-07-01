@@ -19,6 +19,13 @@ type CurrentlyPlayingSong struct {
 	SongID int `db:"song_id"`
 }
 
+type SongHistory struct {
+	ID        int `db:"id"`
+	UserID    int `db:"user_id"`
+	SongID    int `db:"song_id"`
+	Timestamp int `db:"timestamp"`
+}
+
 type Seed struct {
-	Status    int `db:"status"`
+	Status int `db:"status"`
 }

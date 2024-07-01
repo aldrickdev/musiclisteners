@@ -17,9 +17,8 @@ type DB struct {
 	QueryBuffer chan QueryExecutor
 }
 
-// TODO: Add user parameter so that this can be reused in MigrateDB
-func NewDBConnection(password string, querryBufferSize int) (*DB, error) {
-	connectString := fmt.Sprintf("host=db user=app dbname=musiclisteners sslmode=disable password=%s", password)
+func NewDBConnection(user string, password string, queryBufferSize int) (*DB, error) {
+	connectString := fmt.Sprintf("host=db user=%s dbname=musiclisteners sslmode=disable password=%s", user, password)
 	connection, err := sqlx.Connect("postgres", connectString)
 	if err != nil {
 		return nil, err
@@ -27,7 +26,7 @@ func NewDBConnection(password string, querryBufferSize int) (*DB, error) {
 
 	db := &DB{
 		Connection:  connection,
-		QueryBuffer: make(chan QueryExecutor, querryBufferSize),
+		QueryBuffer: make(chan QueryExecutor, queryBufferSize),
 	}
 
 	go db.connectionLoop()
@@ -36,11 +35,11 @@ func NewDBConnection(password string, querryBufferSize int) (*DB, error) {
 }
 
 func MigrateDB(migrations fs.FS) error {
-	connectString := fmt.Sprintf("host=db user=postgres dbname=musiclisteners sslmode=disable password=%s", "example")
-	db, err := sqlx.Connect("postgres", connectString)
+	db, err := NewDBConnection("postgres", "example", 5)
 	if err != nil {
 		return err
 	}
+	defer db.Connection.Close()
 
 	goose.SetBaseFS(migrations)
 	if err = goose.SetDialect("postgres"); err != nil {
@@ -48,9 +47,25 @@ func MigrateDB(migrations fs.FS) error {
 		os.Exit(1)
 	}
 
-	if err = goose.Up(db.DB, "embed/migrations"); err != nil {
+	if err = goose.Up(db.Connection.DB, "embed/migrations"); err != nil {
 		slog.Error("Failed to apply migrations", "error", err)
 		os.Exit(1)
+	}
+
+	return nil
+}
+
+func (db *DB) SeedDB(songs []types.Song, users []types.User) error {
+	err := db.InsertAvailableSongBatch(songs)
+	if err != nil {
+		slog.Error("Failed to insert a batch of available songs", "error", err)
+		return err
+	}
+
+	err = db.InsertUserBatch(users)
+	if err != nil {
+		slog.Error("Failed to insert a batch of users", "error", err)
+		return err
 	}
 
 	return nil
@@ -65,30 +80,6 @@ func (db *DB) connectionLoop() {
 
 func (db *DB) connectionHandler(query QueryExecutor) {
 	query.Execute(db.Connection)
-}
-
-func (db *DB) InsertSeedStatus(status bool) error {
-	statusInt := 0
-	if status {
-		statusInt = 1
-	}
-
-	results, err := db.Connection.NamedExec(InsertSeedStatusQuery, types.Seed{
-		Status: statusInt,
-	})
-	if err != nil {
-		slog.Error("Failed to set seed status", "status", statusInt, "error", err)
-		return err
-	}
-
-	count, err := results.RowsAffected()
-	if err != nil {
-		slog.Warn("Failed to get count of rows affect for seed insert", "error", err)
-	} else {
-		slog.Debug("Row added in the seed table", "rows", count)
-	}
-
-	return nil
 }
 
 func (db *DB) InsertAvailableSongBatch(songs []types.Song) error {
@@ -127,137 +118,49 @@ func (db *DB) InsertUserBatch(users []types.User) error {
 
 func (db *DB) SelectRandomSong() (types.Song, error) {
 	randomSong := types.Song{}
-	row, err := db.Connection.Queryx(SelectRandomSongQuery)
-	if err != nil {
-		return types.Song{}, fmt.Errorf("Failed to get random song: %q", err)
+
+	randomSongChannel := make(chan GetRandomSongQueryResult)
+	randomSongQuery := NewGetRandomSongQuery(randomSongChannel)
+	db.QueryBuffer <- randomSongQuery
+
+	queryBufferLength := len(db.QueryBuffer)
+	slog.Debug("query buffer size", "queued_queries_count", queryBufferLength)
+
+	randomSongResult := <-randomSongChannel
+	if randomSongResult.Err != nil {
+		return randomSong, randomSongResult.Err
 	}
 
-	if row.Next() {
-		err = row.StructScan(&randomSong)
-		if err != nil {
-			return types.Song{}, fmt.Errorf("Failed to scan the random song returned: %q", err)
-		}
-
-		return randomSong, nil
-	}
-
-	return types.Song{}, fmt.Errorf("No songs returned")
+	return randomSongResult.Song, nil
 }
 
-func (db *DB) GetAllUsersOld() ([]types.User, error) {
-	allUsers := []types.User{}
-	singleUser := types.User{}
+func (db *DB) SelectAllUsers() ([]types.User, error) {
+	resultChan := make(chan GetAllUsersQueryResult)
+	query := NewGetAllUsersQuery(resultChan)
+	db.QueryBuffer <- query
 
-	rows, err := db.Connection.Queryx(SelectAllUsers)
-	if err != nil {
-		return allUsers, fmt.Errorf("Failed to query for all users: %q", err)
+	slog.Debug("Waiting for results")
+	queryResults := <-resultChan
+	if queryResults.Err != nil {
+		return queryResults.Users, queryResults.Err
 	}
-	for rows.Next() {
-		err := rows.StructScan(&singleUser)
-		if err != nil {
-			return allUsers, fmt.Errorf("Failed to scan for all users: %q", err)
-		}
+	slog.Debug("count of users found", "count", len(queryResults.Users))
 
-		allUsers = append(allUsers, singleUser)
-	}
-	return allUsers, nil
-}
-
-func (db *DB) SelectCurrentlyPlayingSongForUser(user types.User) (types.Song, error) {
-	song := types.Song{}
-	currentSong := types.CurrentlyPlayingSong{}
-
-	rows, err := db.Connection.NamedQuery(SelectCurrentSongForUserQuery, user)
-	if err != nil {
-		return song, fmt.Errorf("Failed to query for current song: %q", err)
-	}
-	for rows.Next() {
-		err := rows.StructScan(&currentSong)
-		if err != nil {
-			return song, fmt.Errorf("Failed to scan for current song: %q", err)
-		}
-	}
-
-	rows, err = db.Connection.NamedQuery(SelectSongByID, map[string]any{
-		"id": currentSong.SongID,
-	})
-	if err != nil {
-		return song, fmt.Errorf("Failed to query for song: %q", err)
-	}
-	for rows.Next() {
-		err := rows.StructScan(&song)
-		if err != nil {
-			return song, fmt.Errorf("Failed to scan for song: %q", err)
-		}
-
-		slog.Debug("Got current song for user", "user_id", user.ID, "song_id", song.ID)
-	}
-
-	return song, nil
+	return queryResults.Users, nil
 }
 
 func (db *DB) InsertCurrentlyPlayingSongForUser(user types.User, song types.Song) error {
-	result, err := db.Connection.NamedExec(DeleteCurrentSongForUserQuery, user)
-	if err != nil {
-		return fmt.Errorf("Failed to insert current song for user: %q\n", err)
+	insertUserCurrentSongResultChannel := make(chan InsertUserCurrentSongResult)
+	insertUserCurrentSongQuery := NewInsertUserCurrentSongQuery(insertUserCurrentSongResultChannel, user, song)
+	db.QueryBuffer <- insertUserCurrentSongQuery
+
+	queryBufferLength := len(db.QueryBuffer)
+	slog.Debug("query buffer size", "user_id", user.ID, "queued_queries_count", queryBufferLength)
+
+	insertUserCurrentSongResult := <-insertUserCurrentSongResultChannel
+	if insertUserCurrentSongResult.Err != nil {
+		return insertUserCurrentSongResult.Err
 	}
 
-	rowsDeleted, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("Failed to delete current song for user: %q\n", err)
-	}
-	slog.Debug("rows were deleted", "deleted_rows", rowsDeleted)
-
-	currentSongForUser := types.CurrentlyPlayingSong{
-		UserID: user.ID,
-		SongID: song.ID,
-	}
-	result, err = db.Connection.NamedExec(InsertCurrentlyPlayingSongForUserQuery, currentSongForUser)
-	if err != nil {
-		return fmt.Errorf("Failed to insert current song for user: %q\n", err)
-	}
-
-	rowsInserted, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("Failed to obtain the count of rows affect: %q\n", err)
-	}
-	slog.Debug("Current song playing inserted for user", "count", rowsInserted, "user_id", user.ID, "song_id", song.ID)
-	return nil
-}
-
-func (db *DB) InsertCurrentlyPlayingSongForUserTrans(user types.User, song types.Song) error {
-	tx, err := db.Connection.Beginx()
-	if err != nil {
-		return fmt.Errorf("Failed to create the Transaction: %q", err)
-	}
-	result, err := tx.NamedExec(DeleteCurrentSongForUserQuery, user)
-	if err != nil {
-		return fmt.Errorf("Failed to insert current song for user: %q\n", err)
-	}
-
-	rowsDeleted, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("Failed to delete current song for user: %q\n", err)
-	}
-	slog.Debug("Currently playing song deleted for user", "count", rowsDeleted, "user_id", user.ID, "song_id", song.ID)
-
-	currentSongForUser := types.CurrentlyPlayingSong{
-		UserID: user.ID,
-		SongID: song.ID,
-	}
-	result, err = tx.NamedExec(InsertCurrentlyPlayingSongForUserQuery, currentSongForUser)
-	if err != nil {
-		return fmt.Errorf("Failed to insert current song for user: %q\n", err)
-	}
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("Failed to run insert current song transaction for user: %q\n", err)
-	}
-
-	rowsInserted, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("Failed to obtain the count of rows affect: %q\n", err)
-	}
-	slog.Debug("Currently playing song inserted for user", "count", rowsInserted, "user_id", user.ID)
 	return nil
 }

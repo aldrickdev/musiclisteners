@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/aldricdev/musiclisteners/internals/db"
 	"github.com/aldricdev/musiclisteners/internals/types"
 	"github.com/go-faker/faker/v4"
 )
@@ -92,7 +91,7 @@ func GenerateUsers(count int) []types.User {
 func ExtractSongsFromCSVReader(reader *csv.Reader) []types.Song {
 	availableSongs := []types.Song{}
 
-	// get rid of header
+	// get rid of csv header
 	_, err := reader.Read()
 	if err != nil {
 		log.Fatal(err)
@@ -127,18 +126,3 @@ func ExtractSongsFromCSVReader(reader *csv.Reader) []types.Song {
 	return availableSongs
 }
 
-func SeedDB(dbConnection *db.DB, songs []types.Song, users []types.User) error {
-	err := dbConnection.InsertAvailableSongBatch(songs)
-	if err != nil {
-		slog.Error("Failed to insert a batch of available songs", "error", err)
-		return err
-	}
-
-	err = dbConnection.InsertUserBatch(users)
-	if err != nil {
-		slog.Error("Failed to insert a batch of users", "error", err)
-		return err
-	}
-
-	return nil
-}
