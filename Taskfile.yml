@@ -16,7 +16,7 @@ tasks:
       - task --list-all
     silent: true
      
-  # === Application Tasks ===
+# === Application Tasks ===
   app-seed:
     dir: src/
     cmds:
@@ -27,7 +27,8 @@ tasks:
     cmds:
       - go run cmd/app/main.go
 
-  # === Docker Tasks ===
+
+# === Docker Tasks ===
   build-project:
     cmds:
       - docker compose -p project -f docker/docker-compose.yaml build
@@ -51,7 +52,7 @@ tasks:
       - task deploy-project
 
 
-  # === Migration Tasks ===
+# === Migration Tasks ===
   migration-status:
     cmds:
       - GOOSE_DBSTRING={{.CONNSTRING}} goose status 

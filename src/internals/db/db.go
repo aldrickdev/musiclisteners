@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/aldricdev/musiclisteners/internals/types"
+	"github.com/aldricdev/musiclisteners/internals/utils"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/pressly/goose/v3"
@@ -35,7 +36,9 @@ func NewDBConnection(user string, password string, queryBufferSize int) (*DB, er
 }
 
 func MigrateDB(migrations fs.FS) error {
-	db, err := NewDBConnection("postgres", "example", 5)
+	postgresUserPassword := utils.MustGetEnv("POSTGRES_PASSWORD")
+
+	db, err := NewDBConnection("postgres", postgresUserPassword, 5)
 	if err != nil {
 		return err
 	}

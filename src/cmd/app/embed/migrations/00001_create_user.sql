@@ -1,11 +1,13 @@
 -- +goose Up
 -- +goose StatementBegin
 -- +goose ENVSUB ON
-CREATE USER app WITH PASSWORD '${APP_USER_POSTGRES_PASSWORD}';
+CREATE USER ${APP_USER_POSTGRES_USERNAME} WITH PASSWORD '${APP_USER_POSTGRES_PASSWORD}';
 -- +goose ENVSUB OFF
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
-DROP USER app;
+-- +goose ENVSUB ON
+DROP USER ${APP_USER_POSTGRES_USERNAME} ;
+-- +goose ENVSUB OFF
 -- +goose StatementEnd

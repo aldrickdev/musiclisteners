@@ -25,29 +25,10 @@ instances:
     enabled: true
 
 - host: db
-  dbm: true
   port: 5432
   username: datadog
   password: example
   dbname: musiclisteners
-
-  relations:
-  - relation_regex: .*
-
-  query_metrics:
-    collection_interval: 0.1
-
-  query_activity:
-    collection_interval: 0.1
-
-  query_samples:
-    collection_interval: 0.1
-
-  collect_schemas:
-    enabled: true
-
-  collect_settings:
-    enabled: true
 
   custom_queries:
   - metric_prefix: musiclisteners
