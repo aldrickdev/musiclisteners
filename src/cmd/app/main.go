@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/aldricdev/musiclisteners/internals/db"
 	"github.com/aldricdev/musiclisteners/internals/types"
 	"github.com/aldricdev/musiclisteners/internals/utils"
@@ -57,6 +60,14 @@ func init() {
 }
 
 func main() {
+	err := tracer.Start(tracer.WithAgentAddr("datadog-agent:8126"))
+
+	if err != nil {
+		slog.Error("Failed to start tracer", "error", err)
+		os.Exit(1)
+	}
+	defer tracer.Stop()
+
 	slog.Debug("Delay start up to allow for the database to be ready", "delay_in_seconds", StartUpDelay)
 	time.Sleep(StartUpDelay * time.Second)
 
@@ -106,11 +117,16 @@ func main() {
 }
 
 func mainUserLoop(wg *sync.WaitGroup, dbConnection *db.DB, user types.User) {
+
 	slog.Debug("Starting main user loop", "user_id", user.ID)
 
 	for {
+		// span := tracer.StartSpan("user.mainloop", tracer.ResourceName("mainloop"))
+		span, ctx := tracer.StartSpanFromContext(context.Background(), "user.mainloop", tracer.ResourceName("mainloop"))
+		span.SetUser(fmt.Sprintf("%d", user.ID))
+
 		// Get a random song
-		song, err := dbConnection.SelectRandomSong()
+		song, err := dbConnection.SelectRandomSong(ctx)
 		if err != nil {
 			slog.Error("Failed to get random song for user", "user_id", user.ID, "error", err)
 			break
@@ -127,6 +143,8 @@ func mainUserLoop(wg *sync.WaitGroup, dbConnection *db.DB, user types.User) {
 		randomSleep := rand.Intn(10) + 10
 		slog.Debug("User sleeping", "user_id", user.ID, "sleep", randomSleep)
 		time.Sleep(time.Second * time.Duration(randomSleep))
+
+		span.Finish()
 	}
 
 	wg.Done()

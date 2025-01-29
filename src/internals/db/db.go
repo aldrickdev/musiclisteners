@@ -1,11 +1,13 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
 
+	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/aldricdev/musiclisteners/internals/types"
 	"github.com/aldricdev/musiclisteners/internals/utils"
 	"github.com/jmoiron/sqlx"
@@ -19,6 +21,9 @@ type DB struct {
 }
 
 func NewDBConnection(user string, password string, queryBufferSize int) (*DB, error) {
+	span, _ := tracer.StartSpanFromContext(context.Background(), "db", tracer.ResourceName("new-db-connection"))
+	defer span.Finish()
+
 	connectString := fmt.Sprintf("host=db user=%s dbname=musiclisteners sslmode=disable password=%s", user, password)
 	connection, err := sqlx.Connect("postgres", connectString)
 	if err != nil {
@@ -36,6 +41,9 @@ func NewDBConnection(user string, password string, queryBufferSize int) (*DB, er
 }
 
 func MigrateDB(migrations fs.FS) error {
+	span, _ := tracer.StartSpanFromContext(context.Background(), "db", tracer.ResourceName("migrate"))
+	defer span.Finish()
+
 	postgresUserPassword := utils.MustGetEnv("POSTGRES_PASSWORD")
 
 	db, err := NewDBConnection("postgres", postgresUserPassword, 5)
@@ -119,7 +127,10 @@ func (db *DB) InsertUserBatch(users []types.User) error {
 	return nil
 }
 
-func (db *DB) SelectRandomSong() (types.Song, error) {
+func (db *DB) SelectRandomSong(ctx context.Context) (types.Song, error) {
+	span, _ := tracer.StartSpanFromContext(ctx, "db", tracer.ResourceName("select-random-song"))
+	defer span.Finish()
+
 	randomSong := types.Song{}
 
 	randomSongChannel := make(chan GetRandomSongQueryResult)
